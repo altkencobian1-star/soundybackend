@@ -1,0 +1,22 @@
+{
+  "name": "soundy-backend",
+  "version": "1.0.0",
+  "description": "Soundy - Spotify-like music app backend",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "check-ytdlp": "node scripts/check-ytdlp.js",
+    "diagnose": "node scripts/diagnose-download.js",
+    "postinstall": "echo 'skip yt-dlp check'"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "sql.js": "^1.11.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.0",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^1.4.5-lts.1",
+    "uuid": "^10.0.0"
+  }
+}
