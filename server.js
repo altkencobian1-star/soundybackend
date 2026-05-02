@@ -57,6 +57,11 @@ app.use('/api/download', downloadRoutes);
 // Health check
 app.get('/api/health', (req, res) => res.json({ status: 'ok', uptime: process.uptime() }));
 
+// Root route
+app.get("/", (req, res) => {
+  res.send("Soundy backend is running 🚀");
+});
+
 // Global error handler - catches all route errors, returns JSON
 app.use((err, req, res, next) => {
   console.error('[SERVER] Route error:', err.message);
