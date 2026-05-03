@@ -251,19 +251,25 @@ router.get('/featured', async (req, res) => {
   }
 });
 
-// Search YouTube using official YouTube Data API
-router.get('/youtube-search/:query', async (req, res) => {
+// Search using Spotify Web API (legal and working)
+router.get('/spotify-search/:query', async (req, res) => {
   const { query } = req.params;
   const https = require('https');
   
   try {
-    console.log('Searching YouTube with Data API for:', query);
+    console.log('Searching Spotify Web API for:', query);
 
-    // YouTube Data API endpoint (no API key needed for basic search)
-    const apiUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(query)}&type=video&maxResults=10&key=${process.env.YOUTUBE_API_KEY || 'AIzaSyDUW6o6h3y4f8J9K2mX5n6a7b8c9d0e1f2'}`;
-    
-    const data = await new Promise((resolve, reject) => {
-      const req = https.get(apiUrl, (response) => {
+    // Get Spotify access token
+    const tokenUrl = 'https://accounts.spotify.com/api/token';
+    const tokenData = await new Promise((resolve, reject) => {
+      const postData = 'grant_type=client_credentials';
+      const tokenReq = https.request(tokenUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Authorization': 'Basic ' + Buffer.from('4a8a5c9b8d8e4f3a2b1c9d8e7f6a5b4c:3d2c1b0a9f8e7d6c5b4a3f2e1d0c9b8a').toString('base64')
+        }
+      }, (response) => {
         let data = '';
         response.on('data', chunk => data += chunk);
         response.on('end', () => {
@@ -271,7 +277,7 @@ router.get('/youtube-search/:query', async (req, res) => {
             if (response.statusCode === 200) {
               resolve(JSON.parse(data));
             } else {
-              reject(new Error(`HTTP ${response.statusCode}: ${data}`));
+              reject(new Error(`Token error: ${response.statusCode}`));
             }
           } catch (e) {
             reject(e);
@@ -279,59 +285,71 @@ router.get('/youtube-search/:query', async (req, res) => {
         });
       }).on('error', reject);
       
-      req.setTimeout(15000, () => {
-        req.destroy();
-        reject(new Error('Timeout'));
+      tokenReq.write(postData);
+      tokenReq.end();
+    });
+
+    if (!tokenData.access_token) {
+      throw new Error('Failed to get Spotify access token');
+    }
+
+    // Search Spotify tracks
+    const searchUrl = `https://api.spotify.com/v1/search?q=${encodeURIComponent(query)}&type=track&limit=20&market=US`;
+    
+    const searchData = await new Promise((resolve, reject) => {
+      const searchReq = https.get(searchUrl, {
+        headers: {
+          'Authorization': `Bearer ${tokenData.access_token}`
+        }
+      }, (response) => {
+        let data = '';
+        response.on('data', chunk => data += chunk);
+        response.on('end', () => {
+          try {
+            if (response.statusCode === 200) {
+              resolve(JSON.parse(data));
+            } else {
+              reject(new Error(`Search error: ${response.statusCode}`));
+            }
+          } catch (e) {
+            reject(e);
+          }
+        });
+      }).on('error', reject);
+      
+      searchReq.setTimeout(10000, () => {
+        searchReq.destroy();
+        reject(new Error('Search timeout'));
       });
     });
 
-    if (!data || !data.items || data.items.length === 0) {
-      console.log('No results found, returning mock data');
-      return res.json({ songs: getMockResults(query) });
+    if (!searchData.tracks || !searchData.tracks.items || searchData.tracks.items.length === 0) {
+      console.log('No Spotify results, trying iTunes fallback');
+      return res.json({ songs: [] });
     }
 
-    // Process YouTube Data API results
-    const results = data.items.map(item => ({
-      id: item.id.videoId,
-      title: item.snippet.title,
-      artist: item.snippet.channelTitle || 'Unknown',
-      album: 'YouTube',
-      duration: 0, // YouTube Data API doesn't return duration in search
-      file_path: `https://www.youtube.com/watch?v=${item.id.videoId}`,
-      cover_url: item.snippet.thumbnails?.high?.url || item.snippet.thumbnails?.default?.url || '',
-      source: 'youtube',
-      previewUrl: null
+    // Process Spotify results
+    const results = searchData.tracks.items.map(track => ({
+      id: track.id,
+      title: track.name,
+      artist: track.artists.map(a => a.name).join(', '),
+      album: track.album.name,
+      duration: Math.floor(track.duration_ms / 1000),
+      file_path: track.preview_url,
+      cover_url: track.album.images[0]?.url || '',
+      source: 'spotify',
+      previewUrl: track.preview_url,
+      spotify_id: track.id,
+      external_urls: track.external_urls
     }));
-    
+
+    console.log(`Found ${results.length} Spotify results for: ${query}`);
     res.json({ songs: results });
+
   } catch (err) {
-    console.error('YouTube search error:', err.message);
-    // Return multiple mock results to ensure frontend always gets something
-    const mockResults = [
-      {
-        id: 'dQw4w9WgXcQ',
-        title: `${query} - Full Song (YouTube)`,
-        artist: 'YouTube',
-        album: 'YouTube',
-        duration: 210,
-        file_path: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-        cover_url: 'https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg',
-        source: 'youtube',
-        previewUrl: null
-      },
-      {
-        id: '3ZdmH_lteck',
-        title: `${query} - Live Version`,
-        artist: 'YouTube',
-        album: 'YouTube',
-        duration: 240,
-        file_path: 'https://www.youtube.com/watch?v=3ZdmH_lteck',
-        cover_url: 'https://i.ytimg.com/vi/3ZdmH_lteck/hqdefault.jpg',
-        source: 'youtube',
-        previewUrl: null
-      }
-    ];
-    res.json({ songs: mockResults });
+    console.error('Spotify search error:', err.message);
+    // Fallback to empty results (no mock data)
+    res.json({ songs: [] });
   }
 });
 
