@@ -268,9 +268,12 @@ router.get('/hybrid-search/:query', async (req, res) => {
     for (const spotifyTrack of spotifyResults.slice(0, 10)) { // Limit to 10 for performance
       try {
         // Search YouTube for this specific song
-        const youtubeVideo = await findYouTubeVideo(`${spotifyTrack.title} ${spotifyTrack.artist}`);
+        const searchQuery = `${spotifyTrack.title} ${spotifyTrack.artist} official`;
+        console.log(`Searching YouTube for: ${searchQuery}`);
+        const youtubeVideo = await findYouTubeVideo(searchQuery);
         
         if (youtubeVideo) {
+          console.log(`✅ Found YouTube for ${spotifyTrack.title}: ${youtubeVideo.videoId}`);
           hybridResults.push({
             // Spotify metadata (legal discovery)
             id: spotifyTrack.id,
@@ -295,6 +298,7 @@ router.get('/hybrid-search/:query', async (req, res) => {
             full_song_available: true
           });
         } else {
+          console.log(`❌ No YouTube found for ${spotifyTrack.title}, using Spotify only`);
           // Fallback to Spotify preview only
           hybridResults.push({
             ...spotifyTrack,
@@ -303,7 +307,7 @@ router.get('/hybrid-search/:query', async (req, res) => {
           });
         }
       } catch (err) {
-        console.log(`Failed to find YouTube for ${spotifyTrack.title}:`, err.message);
+        console.log(`❌ Failed to find YouTube for ${spotifyTrack.title}:`, err.message);
         // Add Spotify result anyway
         hybridResults.push({
           ...spotifyTrack,
@@ -420,41 +424,64 @@ async function findYouTubeVideo(songQuery) {
   const https = require('https');
   
   try {
-    // Use Invidious instance to search YouTube
-    const invidiousUrl = `https://yewtu.be/api/v1/search?q=${encodeURIComponent(songQuery)}&type=video`;
+    console.log('Searching YouTube for:', songQuery);
     
-    const data = await new Promise((resolve, reject) => {
-      const req = https.get(invidiousUrl, { timeout: 5000 }, (response) => {
-        let data = '';
-        response.on('data', chunk => data += chunk);
-        response.on('end', () => {
-          try {
-            if (response.statusCode === 200) {
-              resolve(JSON.parse(data));
-            } else {
-              reject(new Error(`HTTP ${response.statusCode}`));
-            }
-          } catch (e) {
-            reject(e);
-          }
+    // Try multiple Invidious instances for better reliability
+    const instances = [
+      'https://yewtu.be',
+      'https://invidious.snopyta.org',
+      'https://vid.puffyan.us'
+    ];
+    
+    for (const instance of instances) {
+      try {
+        const invidiousUrl = `${instance}/api/v1/search?q=${encodeURIComponent(songQuery)}&type=video`;
+        
+        const data = await new Promise((resolve, reject) => {
+          const req = https.get(invidiousUrl, { timeout: 5000 }, (response) => {
+            let data = '';
+            response.on('data', chunk => data += chunk);
+            response.on('end', () => {
+              try {
+                if (response.statusCode === 200) {
+                  resolve(JSON.parse(data));
+                } else {
+                  reject(new Error(`HTTP ${response.statusCode}`));
+                }
+              } catch (e) {
+                reject(e);
+              }
+            });
+          }).on('error', reject);
+          
+          req.setTimeout(5000, () => {
+            req.destroy();
+            reject(new Error('Timeout'));
+          });
         });
-      }).on('error', reject);
-      
-      req.setTimeout(5000, () => {
-        req.destroy();
-        reject(new Error('Timeout'));
-      });
-    });
 
-    if (data && data.length > 0) {
-      const video = data[0];
-      return {
-        videoId: video.videoId,
-        title: video.title,
-        thumbnail: video.videoThumbnails?.[0]?.url || ''
-      };
+        if (data && data.length > 0) {
+          // Find the best match (prefer official music videos)
+          const video = data.find(v => 
+            v.title.toLowerCase().includes('official') ||
+            v.title.toLowerCase().includes('music video') ||
+            v.title.toLowerCase().includes('audio')
+          ) || data[0];
+          
+          console.log(`Found YouTube video via ${instance}:`, video.title);
+          return {
+            videoId: video.videoId,
+            title: video.title,
+            thumbnail: video.videoThumbnails?.[0]?.url || ''
+          };
+        }
+      } catch (err) {
+        console.log(`Instance ${instance} failed:`, err.message);
+        continue;
+      }
     }
     
+    console.log('No YouTube video found for:', songQuery);
     return null;
   } catch (err) {
     console.log('YouTube search failed:', err.message);
