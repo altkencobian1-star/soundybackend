@@ -503,6 +503,90 @@ router.get('/spotify-search/:query', async (req, res) => {
   }
 });
 
+// Simple YouTube search for full songs
+router.get('/youtube-search/:query', async (req, res) => {
+  const { query } = req.params;
+  const https = require('https');
+  
+  try {
+    console.log('Direct YouTube search for:', query);
+    
+    // Use multiple Invidious instances for reliability
+    const instances = [
+      'https://yewtu.be',
+      'https://invidious.snopyta.org',
+      'https://vid.puffyan.us'
+    ];
+    
+    let results = [];
+    
+    for (const instance of instances) {
+      try {
+        const invidiousUrl = `${instance}/api/v1/search?q=${encodeURIComponent(query)}&type=video`;
+        
+        const data = await new Promise((resolve, reject) => {
+          const req = https.get(invidiousUrl, { timeout: 5000 }, (response) => {
+            let data = '';
+            response.on('data', chunk => data += chunk);
+            response.on('end', () => {
+              try {
+                if (response.statusCode === 200) {
+                  resolve(JSON.parse(data));
+                } else {
+                  reject(new Error(`HTTP ${response.statusCode}`));
+                }
+              } catch (e) {
+                reject(e);
+              }
+            });
+          }).on('error', reject);
+          
+          req.setTimeout(5000, () => {
+            req.destroy();
+            reject(new Error('Timeout'));
+          });
+        });
+
+        if (data && data.length > 0) {
+          console.log(`✅ Found ${data.length} YouTube videos via ${instance}`);
+          
+          // Process YouTube results
+          results = data.slice(0, 10).map(v => ({
+            id: v.videoId,
+            title: v.title,
+            artist: v.author || v.channelTitle || 'Unknown',
+            album: 'YouTube',
+            duration: Math.floor(v.lengthSeconds || 0),
+            file_path: `https://www.youtube.com/watch?v=${v.videoId}`,
+            cover_url: v.videoThumbnails?.[0]?.url || '',
+            source: 'youtube',
+            previewUrl: null,
+            youtube_id: v.videoId,
+            full_song_available: true
+          }));
+          
+          break; // Found results, stop trying other instances
+        }
+      } catch (err) {
+        console.log(`Instance ${instance} failed:`, err.message);
+        continue;
+      }
+    }
+    
+    if (results.length === 0) {
+      console.log('No YouTube results found, returning empty');
+      return res.json({ songs: [] });
+    }
+    
+    console.log(`Returning ${results.length} YouTube results`);
+    res.json({ songs: results });
+    
+  } catch (err) {
+    console.error('YouTube search error:', err.message);
+    res.json({ songs: [] });
+  }
+});
+
 // Stream YouTube audio - simplified approach
 router.get('/:id/stream', async (req, res) => {
   const { id } = req.params;
