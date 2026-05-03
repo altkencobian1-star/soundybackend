@@ -352,39 +352,70 @@ router.get('/youtube-search/:query', async (req, res) => {
   }
 });
 
-// Stream YouTube audio
+// Stream YouTube audio (direct streaming without database requirement)
 router.get('/:id/stream', async (req, res) => {
   const { id } = req.params;
   try {
     console.log('Streaming YouTube audio for:', id);
     
-    // For YouTube videos, we need to extract audio and stream it
-    // Use yt-dlp to get audio stream URL
-    const { findYtDlp } = require('../services/streamService');
-    const ytDlpPath = await findYtDlp();
-    
-    if (!ytDlpPath) {
-      // Fallback: redirect to YouTube embed
-      return res.redirect(`https://www.youtube.com/embed/${id}?autoplay=1`);
+    // Check if this is a YouTube video ID
+    if (id.length === 11) { // YouTube video IDs are 11 characters
+      console.log('Detected YouTube video, streaming directly');
+      
+      // Try to get audio stream URL using yt-dlp
+      try {
+        const { findYtDlp } = require('../services/streamService');
+        const ytDlpPath = await findYtDlp();
+        
+        if (ytDlpPath) {
+          const streamCmd = `"${ytDlpPath}" "https://www.youtube.com/watch?v=${id}" --get-url --format=bestaudio/best --no-download`;
+          const { stdout } = await execAsync(streamCmd, { timeout: 30000 });
+          
+          if (stdout) {
+            const streamUrl = stdout.trim();
+            console.log('Redirecting to YouTube audio stream:', streamUrl);
+            return res.redirect(streamUrl);
+          }
+        }
+      } catch (ytError) {
+        console.log('yt-dlp failed, using fallback:', ytError.message);
+      }
+      
+      // Fallback: redirect to YouTube video (will play video instead of just audio)
+      console.log('Falling back to YouTube video');
+      return res.redirect(`https://www.youtube.com/watch?v=${id}`);
     }
     
-    // Get audio stream URL using yt-dlp
-    const streamCmd = `"${ytDlpPath}" "https://www.youtube.com/watch?v=${id}" --get-url --format=bestaudio/best --no-download`;
+    // For non-YouTube IDs, check database
+    await getDB();
+    const { results } = runQuery('SELECT * FROM songs WHERE id = ? OR file_path = ?', [id, id]);
     
-    const { stdout } = await execAsync(streamCmd, { timeout: 30000 });
-    
-    if (stdout) {
-      const streamUrl = stdout.trim();
-      console.log('Redirecting to stream URL:', streamUrl);
-      return res.redirect(streamUrl);
-    } else {
-      // Fallback to YouTube embed
-      return res.redirect(`https://www.youtube.com/embed/${id}?autoplay=1`);
+    if (!results[0]) {
+      console.log('Song not found in database');
+      return res.status(404).json({ error: 'Song not found' });
     }
+    
+    const song = results[0];
+    
+    // If it's a YouTube video in database, stream it
+    if (song.file_path && song.file_path.includes('youtube.com/watch?v=')) {
+      const videoId = song.file_path.split('v=')[1]?.split('&')[0];
+      if (videoId) {
+        return res.redirect(`https://www.youtube.com/watch?v=${videoId}`);
+      }
+    }
+    
+    // For local files, serve them
+    if (song.file_path && fs.existsSync(song.file_path)) {
+      return res.sendFile(song.file_path);
+    }
+    
+    // Default fallback
+    res.status(404).json({ error: 'Song not found' });
+    
   } catch (err) {
     console.error('Stream error:', err.message);
-    // Fallback to YouTube embed
-    return res.redirect(`https://www.youtube.com/embed/${id}?autoplay=1`);
+    res.status(500).json({ error: 'Stream failed' });
   }
 });
 
