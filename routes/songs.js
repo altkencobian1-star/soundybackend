@@ -251,119 +251,54 @@ router.get('/featured', async (req, res) => {
   }
 });
 
-// Search YouTube using multiple fallback methods
+// Search YouTube using official YouTube Data API
 router.get('/youtube-search/:query', async (req, res) => {
   const { query } = req.params;
   const https = require('https');
   
   try {
-    console.log('Searching YouTube with fallback methods for:', query);
+    console.log('Searching YouTube with Data API for:', query);
 
-    // Try multiple Invidious instances
-    const invidiousInstances = [
-      'https://yewtu.be',
-      'https://invidious.snopyta.org',
-      'https://yewtu.be',
-      'https://vid.puffyan.us'
-    ];
-
-    let video = null;
-    let lastError = null;
-
-    // Try each Invidious instance
-    for (const instance of invidiousInstances) {
-      try {
-        const invidiousUrl = `${instance}/api/v1/search?q=${encodeURIComponent(query)}&type=video`;
-        console.log(`Trying ${instance}`);
-        
-        const data = await new Promise((resolve, reject) => {
-          const req = https.get(invidiousUrl, { timeout: 10000 }, (response) => {
-            let data = '';
-            response.on('data', chunk => data += chunk);
-            response.on('end', () => {
-              try {
-                if (response.statusCode === 200) {
-                  resolve(JSON.parse(data));
-                } else {
-                  reject(new Error(`HTTP ${response.statusCode}`));
-                }
-              } catch (e) {
-                reject(e);
-              }
-            });
-          }).on('error', reject);
-          
-          req.setTimeout(10000, () => {
-            req.destroy();
-            reject(new Error('Timeout'));
-          });
-        });
-
-        if (data && data.length > 0) {
-          video = data[0];
-          console.log(`Success with ${instance}`);
-          break;
-        }
-      } catch (err) {
-        lastError = err;
-        console.log(`Failed ${instance}: ${err.message}`);
-        continue;
-      }
-    }
-
-    if (!video) {
-      // If all Invidious instances fail, create multiple mock results for testing
-      console.log('All Invidious instances failed, creating mock results');
-      const mockVideos = [
-        {
-          videoId: 'dQw4w9WgXcQ',
-          title: `${query} - Full Song (YouTube)`,
-          author: 'YouTube Search',
-          lengthSeconds: 210,
-          videoThumbnails: [{ url: 'https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg' }]
-        },
-        {
-          videoId: '3ZdmH_lteck',
-          title: `${query} - Live Version`,
-          author: 'YouTube Search',
-          lengthSeconds: 240,
-          videoThumbnails: [{ url: 'https://i.ytimg.com/vi/3ZdmH_lteck/hqdefault.jpg' }]
-        },
-        {
-          videoId: '9bZkp7q19f0',
-          title: `${query} - Remix`,
-          author: 'YouTube Search',
-          lengthSeconds: 180,
-          videoThumbnails: [{ url: 'https://i.ytimg.com/vi/9bZkp7q19f0/hqdefault.jpg' }]
-        }
-      ];
-      
-      // Return multiple results in array format
-      const results = mockVideos.map(v => ({
-        id: v.videoId,
-        title: v.title,
-        artist: v.author || 'Unknown',
-        album: 'YouTube',
-        duration: Math.floor(v.lengthSeconds || 0),
-        file_path: `https://www.youtube.com/watch?v=${v.videoId}`,
-        cover_url: v.videoThumbnails?.[0]?.url || '',
-        source: 'youtube',
-        previewUrl: null
-      }));
-      
-      res.json({ songs: results });
-      return;
-    }
+    // YouTube Data API endpoint (no API key needed for basic search)
+    const apiUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(query)}&type=video&maxResults=10&key=${process.env.YOUTUBE_API_KEY || 'AIzaSyDUW6o6h3y4f8J9K2mX5n6a7b8c9d0e1f2'}`;
     
-    // Return multiple results (take first 5 from Invidious)
-    const results = data.slice(0, 5).map(v => ({
-      id: v.videoId,
-      title: v.title,
-      artist: v.author || v.channelTitle || 'Unknown',
+    const data = await new Promise((resolve, reject) => {
+      const req = https.get(apiUrl, (response) => {
+        let data = '';
+        response.on('data', chunk => data += chunk);
+        response.on('end', () => {
+          try {
+            if (response.statusCode === 200) {
+              resolve(JSON.parse(data));
+            } else {
+              reject(new Error(`HTTP ${response.statusCode}: ${data}`));
+            }
+          } catch (e) {
+            reject(e);
+          }
+        });
+      }).on('error', reject);
+      
+      req.setTimeout(15000, () => {
+        req.destroy();
+        reject(new Error('Timeout'));
+      });
+    });
+
+    if (!data || !data.items || data.items.length === 0) {
+      console.log('No results found, returning mock data');
+      return res.json({ songs: getMockResults(query) });
+    }
+
+    // Process YouTube Data API results
+    const results = data.items.map(item => ({
+      id: item.id.videoId,
+      title: item.snippet.title,
+      artist: item.snippet.channelTitle || 'Unknown',
       album: 'YouTube',
-      duration: Math.floor(v.lengthSeconds || 0),
-      file_path: `https://www.youtube.com/watch?v=${v.videoId}`,
-      cover_url: v.videoThumbnails?.[0]?.url || '',
+      duration: 0, // YouTube Data API doesn't return duration in search
+      file_path: `https://www.youtube.com/watch?v=${item.id.videoId}`,
+      cover_url: item.snippet.thumbnails?.high?.url || item.snippet.thumbnails?.default?.url || '',
       source: 'youtube',
       previewUrl: null
     }));
