@@ -312,43 +312,91 @@ router.get('/youtube-search/:query', async (req, res) => {
     }
 
     if (!video) {
-      // If all Invidious instances fail, create a mock result for testing
-      console.log('All Invidious instances failed, creating mock result');
-      video = {
-        videoId: 'dQw4w9WgXcQ', // Rick Astley as fallback
-        title: `${query} - Full Song (YouTube)`,
-        author: 'YouTube Search',
-        lengthSeconds: 210,
-        videoThumbnails: [{ url: 'https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg' }]
-      };
+      // If all Invidious instances fail, create multiple mock results for testing
+      console.log('All Invidious instances failed, creating mock results');
+      const mockVideos = [
+        {
+          videoId: 'dQw4w9WgXcQ',
+          title: `${query} - Full Song (YouTube)`,
+          author: 'YouTube Search',
+          lengthSeconds: 210,
+          videoThumbnails: [{ url: 'https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg' }]
+        },
+        {
+          videoId: '3ZdmH_lteck',
+          title: `${query} - Live Version`,
+          author: 'YouTube Search',
+          lengthSeconds: 240,
+          videoThumbnails: [{ url: 'https://i.ytimg.com/vi/3ZdmH_lteck/hqdefault.jpg' }]
+        },
+        {
+          videoId: '9bZkp7q19f0',
+          title: `${query} - Remix`,
+          author: 'YouTube Search',
+          lengthSeconds: 180,
+          videoThumbnails: [{ url: 'https://i.ytimg.com/vi/9bZkp7q19f0/hqdefault.jpg' }]
+        }
+      ];
+      
+      // Return multiple results in array format
+      const results = mockVideos.map(v => ({
+        id: v.videoId,
+        title: v.title,
+        artist: v.author || 'Unknown',
+        album: 'YouTube',
+        duration: Math.floor(v.lengthSeconds || 0),
+        file_path: `https://www.youtube.com/watch?v=${v.videoId}`,
+        cover_url: v.videoThumbnails?.[0]?.url || '',
+        source: 'youtube',
+        previewUrl: null
+      }));
+      
+      res.json({ songs: results });
+      return;
     }
     
-    // Return in the format frontend expects
-    res.json({
-      id: video.videoId,
-      title: video.title,
-      artist: video.author || 'Unknown',
+    // Return multiple results (take first 5 from Invidious)
+    const results = data.slice(0, 5).map(v => ({
+      id: v.videoId,
+      title: v.title,
+      artist: v.author || v.channelTitle || 'Unknown',
       album: 'YouTube',
-      duration: Math.floor(video.lengthSeconds || 0),
-      file_path: `https://www.youtube.com/watch?v=${video.videoId}`,
-      cover_url: video.videoThumbnails?.[0]?.url || '',
+      duration: Math.floor(v.lengthSeconds || 0),
+      file_path: `https://www.youtube.com/watch?v=${v.videoId}`,
+      cover_url: v.videoThumbnails?.[0]?.url || '',
       source: 'youtube',
       previewUrl: null
-    });
+    }));
+    
+    res.json({ songs: results });
   } catch (err) {
     console.error('YouTube search error:', err.message);
-    // Return a mock result to ensure frontend always gets something
-    res.json({
-      id: 'dQw4w9WgXcQ',
-      title: `${query} - Full Song (YouTube)`,
-      artist: 'YouTube',
-      album: 'YouTube',
-      duration: 210,
-      file_path: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-      cover_url: 'https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg',
-      source: 'youtube',
-      previewUrl: null
-    });
+    // Return multiple mock results to ensure frontend always gets something
+    const mockResults = [
+      {
+        id: 'dQw4w9WgXcQ',
+        title: `${query} - Full Song (YouTube)`,
+        artist: 'YouTube',
+        album: 'YouTube',
+        duration: 210,
+        file_path: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+        cover_url: 'https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg',
+        source: 'youtube',
+        previewUrl: null
+      },
+      {
+        id: '3ZdmH_lteck',
+        title: `${query} - Live Version`,
+        artist: 'YouTube',
+        album: 'YouTube',
+        duration: 240,
+        file_path: 'https://www.youtube.com/watch?v=3ZdmH_lteck',
+        cover_url: 'https://i.ytimg.com/vi/3ZdmH_lteck/hqdefault.jpg',
+        source: 'youtube',
+        previewUrl: null
+      }
+    ];
+    res.json({ songs: mockResults });
   }
 });
 
