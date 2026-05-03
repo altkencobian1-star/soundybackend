@@ -107,12 +107,30 @@ async function initDB() {
       stream_type TEXT, -- 'embed' | 'direct' | 'preview'
       preview_url TEXT, -- 30-sec preview if available
       file_path TEXT, -- for user uploads
+      user_id INTEGER DEFAULT NULL, -- for personal library uploads
       external_ids TEXT, -- JSON: {spotify: '...', youtube: '...', isrc: '...'}
       metadata TEXT, -- JSON: flexible metadata storage
       popularity INTEGER DEFAULT 0, -- 0-100 ranking
       is_streamable BOOLEAN DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    -- Simple songs table for personal library (alternative to tracks table)
+    CREATE TABLE IF NOT EXISTS songs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      artist TEXT NOT NULL,
+      album TEXT DEFAULT '',
+      duration INTEGER DEFAULT 0,
+      cover_url TEXT DEFAULT '',
+      file_path TEXT NOT NULL,
+      source TEXT DEFAULT 'personal', -- 'personal' | 'youtube' | 'itunes'
+      user_id INTEGER DEFAULT NULL,
+      previewUrl TEXT DEFAULT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
     -- User's library (saved tracks)

@@ -383,6 +383,163 @@ router.get('/:id/stream', async (req, res) => {
   }
 });
 
+// Upload MP3 file to personal library
+router.post('/upload', authMiddleware, upload.single('mp3'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    const { title, artist, album } = req.body;
+    const userId = req.user.id;
+    
+    console.log('Uploading MP3:', req.file.originalname, 'User:', userId);
+    
+    // Generate unique filename
+    const filename = `user-${userId}-${Date.now()}.mp3`;
+    const filePath = path.join(__dirname, '..', 'audio-storage', filename);
+    
+    // Move file to storage
+    fs.renameSync(req.file.path, filePath);
+    
+    // Extract metadata from file (basic implementation)
+    let songTitle = title || req.file.originalname.replace('.mp3', '');
+    let songArtist = artist || 'Unknown Artist';
+    let songAlbum = album || 'Personal Library';
+    
+    // Save to database
+    await getDB();
+    runRun(
+      'INSERT INTO songs (title, artist, album, duration, file_path, cover_url, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [songTitle, songArtist, songAlbum, 0, filename, '', userId]
+    );
+    
+    const songId = getLastInsertId();
+    
+    res.json({
+      success: true,
+      song: {
+        id: songId,
+        title: songTitle,
+        artist: songArtist,
+        album: songAlbum,
+        duration: 0,
+        file_path: `/api/songs/${songId}/stream`,
+        cover_url: '',
+        source: 'personal',
+        previewUrl: null
+      }
+    });
+    
+  } catch (err) {
+    console.error('Upload error:', err);
+    res.status(500).json({ error: 'Upload failed' });
+  }
+});
+
+// Stream personal library files directly from server
+router.get('/:id/stream', async (req, res) => {
+  const { id } = req.params;
+  try {
+    console.log('Streaming personal library file for song ID:', id);
+    
+    await getDB();
+    const { results } = runQuery('SELECT * FROM songs WHERE id = ?', [id]);
+    
+    if (!results[0]) {
+      console.log('Song not found in database');
+      return res.status(404).json({ error: 'Song not found' });
+    }
+    
+    const song = results[0];
+    
+    // Check if it's a personal library file
+    if (song.user_id && song.file_path) {
+      const filePath = path.join(__dirname, '..', 'audio-storage', song.file_path);
+      
+      if (fs.existsSync(filePath)) {
+        console.log('Streaming personal file:', filePath);
+        res.setHeader('Content-Type', 'audio/mpeg');
+        res.setHeader('Content-Disposition', `inline; filename="${song.title}.mp3"`);
+        return res.sendFile(filePath);
+      } else {
+        console.log('Personal file not found:', filePath);
+        return res.status(404).json({ error: 'File not found' });
+      }
+    }
+    
+    // Check if this is a YouTube video ID (11 characters)
+    if (song.file_path && song.file_path.includes('youtube.com/watch?v=')) {
+      const videoId = song.file_path.split('v=')[1]?.split('&')[0];
+      if (videoId && videoId.length === 11) {
+        console.log('Detected YouTube video, creating embed page');
+        
+        // Create an HTML page that will play the YouTube video
+        const html = `
+<!DOCTYPE html>
+<html>
+<head>
+    <title>YouTube Player</title>
+    <style>
+        body { margin: 0; padding: 0; background: #000; }
+        iframe { 
+            position: absolute; 
+            top: 0; left: 0; 
+            width: 100%; height: 100%; 
+            border: none; 
+        }
+    </style>
+</head>
+<body>
+    <iframe 
+        src="https://www.youtube.com/embed/${videoId}?autoplay=1&controls=1&modestbranding=1" 
+        allow="autoplay; encrypted-media" 
+        allowfullscreen>
+    </iframe>
+</body>
+</html>`;
+        
+        res.setHeader('Content-Type', 'text/html');
+        return res.send(html);
+      }
+    }
+    
+    // Default fallback
+    res.status(404).json({ error: 'Song not found' });
+    
+  } catch (err) {
+    console.error('Stream error:', err.message);
+    res.status(500).json({ error: 'Stream failed' });
+  }
+});
+
+// Get user's personal library
+router.get('/personal', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    
+    await getDB();
+    const { results } = runQuery('SELECT * FROM songs WHERE user_id = ? ORDER BY created_at DESC', [userId]);
+    
+    const songs = results.map(song => ({
+      id: song.id,
+      title: song.title,
+      artist: song.artist,
+      album: song.album,
+      duration: song.duration,
+      file_path: `/api/songs/${song.id}/stream`,
+      cover_url: song.cover_url,
+      source: 'personal',
+      previewUrl: null
+    }));
+    
+    res.json({ songs });
+  } catch (err) {
+    console.error('Personal library error:', err);
+    res.status(500).json({ error: 'Failed to fetch personal library' });
+  }
+});
+
 // Ensure a song exists in DB (for online songs, save them first)
 async function ensureSongInDB(songData) {
   const { id, title, artist, album, duration, file_path, cover_url, source, previewUrl } = songData;
