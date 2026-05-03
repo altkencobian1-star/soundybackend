@@ -251,54 +251,52 @@ router.get('/featured', async (req, res) => {
   }
 });
 
-// Search YouTube using yt-dlp (no API quota limits!)
+// Search YouTube using Invidious API (no API keys required!)
 router.get('/youtube-search/:query', async (req, res) => {
   const { query } = req.params;
   try {
-    console.log('Searching YouTube with yt-dlp for:', query);
+    console.log('Searching YouTube via Invidious for:', query);
 
-    // Import findYtDlp from streamService
-    const { findYtDlp } = require('../services/streamService');
-    const ytDlpPath = await findYtDlp();
+    // Use Invidious API (YouTube frontend without API keys)
+    const invidiousUrl = `https://yewtu.be/api/v1/search?q=${encodeURIComponent(query)}&type=video`;
     
-    if (!ytDlpPath) {
-      return res.status(500).json({ error: 'yt-dlp not found' });
-    }
+    const https = require('https');
+    const data = await new Promise((resolve, reject) => {
+      https.get(invidiousUrl, (response) => {
+        let data = '';
+        response.on('data', chunk => data += chunk);
+        response.on('end', () => {
+          try {
+            resolve(JSON.parse(data));
+          } catch (e) {
+            reject(e);
+          }
+        });
+      }).on('error', reject);
+    });
 
-    // Use yt-dlp to search YouTube and get the first result
-    // --dump-json outputs video info as JSON
-    const searchCmd = `"${ytDlpPath}" "ytsearch1:${query}" --dump-json --no-download --quiet`;
-
-    const { stdout } = await execAsync(searchCmd, { timeout: 30000 });
-
-    if (!stdout) {
+    if (!data || data.length === 0) {
       return res.status(404).json({ error: 'No video found' });
     }
 
-    // Parse the JSON output
-    const videoInfo = JSON.parse(stdout);
-
-    // Return in YouTube Data API format that frontend expects
+    // Get the first result
+    const video = data[0];
+    
+    // Return in the format frontend expects
     res.json({
-      items: [{
-        id: { videoId: videoInfo.id },
-        snippet: {
-          title: videoInfo.title,
-          channelTitle: videoInfo.channel || videoInfo.uploader,
-          thumbnails: {
-            default: { url: videoInfo.thumbnail },
-            medium: { url: videoInfo.thumbnail },
-            high: { url: videoInfo.thumbnail }
-          }
-        },
-        contentDetails: {
-          duration: videoInfo.duration
-        }
-      }]
+      id: video.videoId,
+      title: video.title,
+      artist: video.channelTitle || video.author || 'Unknown',
+      album: 'YouTube',
+      duration: Math.floor(video.lengthSeconds || 0),
+      file_path: `https://www.youtube.com/watch?v=${video.videoId}`,
+      cover_url: video.videoThumbnails?.[0]?.url || '',
+      source: 'youtube',
+      previewUrl: null
     });
   } catch (err) {
     console.error('YouTube search error:', err.message);
-    // If yt-dlp fails, return error so frontend can fallback to preview
+    // If Invidious fails, return error so frontend can fallback to iTunes
     res.status(500).json({ error: 'YouTube search failed: ' + err.message });
   }
 });
