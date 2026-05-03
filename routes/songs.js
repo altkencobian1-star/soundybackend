@@ -352,6 +352,42 @@ router.get('/youtube-search/:query', async (req, res) => {
   }
 });
 
+// Stream YouTube audio
+router.get('/:id/stream', async (req, res) => {
+  const { id } = req.params;
+  try {
+    console.log('Streaming YouTube audio for:', id);
+    
+    // For YouTube videos, we need to extract audio and stream it
+    // Use yt-dlp to get audio stream URL
+    const { findYtDlp } = require('../services/streamService');
+    const ytDlpPath = await findYtDlp();
+    
+    if (!ytDlpPath) {
+      // Fallback: redirect to YouTube embed
+      return res.redirect(`https://www.youtube.com/embed/${id}?autoplay=1`);
+    }
+    
+    // Get audio stream URL using yt-dlp
+    const streamCmd = `"${ytDlpPath}" "https://www.youtube.com/watch?v=${id}" --get-url --format=bestaudio/best --no-download`;
+    
+    const { stdout } = await execAsync(streamCmd, { timeout: 30000 });
+    
+    if (stdout) {
+      const streamUrl = stdout.trim();
+      console.log('Redirecting to stream URL:', streamUrl);
+      return res.redirect(streamUrl);
+    } else {
+      // Fallback to YouTube embed
+      return res.redirect(`https://www.youtube.com/embed/${id}?autoplay=1`);
+    }
+  } catch (err) {
+    console.error('Stream error:', err.message);
+    // Fallback to YouTube embed
+    return res.redirect(`https://www.youtube.com/embed/${id}?autoplay=1`);
+  }
+});
+
 // Ensure a song exists in DB (for online songs, save them first)
 async function ensureSongInDB(songData) {
   const { id, title, artist, album, duration, file_path, cover_url, source, previewUrl } = songData;
