@@ -251,14 +251,82 @@ router.get('/featured', async (req, res) => {
   }
 });
 
-// Search using Spotify Web API (legal and working)
-router.get('/spotify-search/:query', async (req, res) => {
+// Hybrid search: Spotify metadata + YouTube full songs
+router.get('/hybrid-search/:query', async (req, res) => {
   const { query } = req.params;
   const https = require('https');
   
   try {
-    console.log('Searching Spotify Web API for:', query);
+    console.log('Hybrid search for:', query);
 
+    // Step 1: Get Spotify metadata
+    const spotifyResults = await getSpotifyResults(query);
+    
+    // Step 2: For each Spotify result, find YouTube video for full song
+    const hybridResults = [];
+    
+    for (const spotifyTrack of spotifyResults.slice(0, 10)) { // Limit to 10 for performance
+      try {
+        // Search YouTube for this specific song
+        const youtubeVideo = await findYouTubeVideo(`${spotifyTrack.title} ${spotifyTrack.artist}`);
+        
+        if (youtubeVideo) {
+          hybridResults.push({
+            // Spotify metadata (legal discovery)
+            id: spotifyTrack.id,
+            title: spotifyTrack.title,
+            artist: spotifyTrack.artist,
+            album: spotifyTrack.album,
+            duration: spotifyTrack.duration,
+            cover_url: spotifyTrack.cover_url,
+            spotify_id: spotifyTrack.spotify_id,
+            external_urls: spotifyTrack.external_urls,
+            previewUrl: spotifyTrack.previewUrl,
+            
+            // YouTube for full song playback
+            youtube_id: youtubeVideo.videoId,
+            youtube_title: youtubeVideo.title,
+            youtube_url: `https://www.youtube.com/watch?v=${youtubeVideo.videoId}`,
+            youtube_thumbnail: youtubeVideo.thumbnail,
+            
+            // Combined info
+            source: 'hybrid',
+            file_path: `https://www.youtube.com/watch?v=${youtubeVideo.videoId}`,
+            full_song_available: true
+          });
+        } else {
+          // Fallback to Spotify preview only
+          hybridResults.push({
+            ...spotifyTrack,
+            source: 'spotify',
+            full_song_available: false
+          });
+        }
+      } catch (err) {
+        console.log(`Failed to find YouTube for ${spotifyTrack.title}:`, err.message);
+        // Add Spotify result anyway
+        hybridResults.push({
+          ...spotifyTrack,
+          source: 'spotify',
+          full_song_available: false
+        });
+      }
+    }
+
+    console.log(`Hybrid search complete: ${hybridResults.length} results for: ${query}`);
+    res.json({ songs: hybridResults });
+
+  } catch (err) {
+    console.error('Hybrid search error:', err.message);
+    res.json({ songs: [] });
+  }
+});
+
+// Helper function to get Spotify results
+async function getSpotifyResults(query) {
+  const https = require('https');
+  
+  try {
     // Get Spotify access token
     const tokenUrl = 'https://accounts.spotify.com/api/token';
     const tokenData = await new Promise((resolve, reject) => {
@@ -324,18 +392,16 @@ router.get('/spotify-search/:query', async (req, res) => {
     });
 
     if (!searchData.tracks || !searchData.tracks.items || searchData.tracks.items.length === 0) {
-      console.log('No Spotify results, trying iTunes fallback');
-      return res.json({ songs: [] });
+      return [];
     }
 
     // Process Spotify results
-    const results = searchData.tracks.items.map(track => ({
+    return searchData.tracks.items.map(track => ({
       id: track.id,
       title: track.name,
       artist: track.artists.map(a => a.name).join(', '),
       album: track.album.name,
       duration: Math.floor(track.duration_ms / 1000),
-      file_path: track.preview_url,
       cover_url: track.album.images[0]?.url || '',
       source: 'spotify',
       previewUrl: track.preview_url,
@@ -343,12 +409,69 @@ router.get('/spotify-search/:query', async (req, res) => {
       external_urls: track.external_urls
     }));
 
-    console.log(`Found ${results.length} Spotify results for: ${query}`);
-    res.json({ songs: results });
-
   } catch (err) {
     console.error('Spotify search error:', err.message);
-    // Fallback to empty results (no mock data)
+    return [];
+  }
+}
+
+// Helper function to find YouTube video for a song
+async function findYouTubeVideo(songQuery) {
+  const https = require('https');
+  
+  try {
+    // Use Invidious instance to search YouTube
+    const invidiousUrl = `https://yewtu.be/api/v1/search?q=${encodeURIComponent(songQuery)}&type=video`;
+    
+    const data = await new Promise((resolve, reject) => {
+      const req = https.get(invidiousUrl, { timeout: 5000 }, (response) => {
+        let data = '';
+        response.on('data', chunk => data += chunk);
+        response.on('end', () => {
+          try {
+            if (response.statusCode === 200) {
+              resolve(JSON.parse(data));
+            } else {
+              reject(new Error(`HTTP ${response.statusCode}`));
+            }
+          } catch (e) {
+            reject(e);
+          }
+        });
+      }).on('error', reject);
+      
+      req.setTimeout(5000, () => {
+        req.destroy();
+        reject(new Error('Timeout'));
+      });
+    });
+
+    if (data && data.length > 0) {
+      const video = data[0];
+      return {
+        videoId: video.videoId,
+        title: video.title,
+        thumbnail: video.videoThumbnails?.[0]?.url || ''
+      };
+    }
+    
+    return null;
+  } catch (err) {
+    console.log('YouTube search failed:', err.message);
+    return null;
+  }
+}
+
+// Keep original Spotify search for compatibility
+router.get('/spotify-search/:query', async (req, res) => {
+  const { query } = req.params;
+  
+  try {
+    const results = await getSpotifyResults(query);
+    console.log(`Found ${results.length} Spotify results for: ${query}`);
+    res.json({ songs: results });
+  } catch (err) {
+    console.error('Spotify search error:', err.message);
     res.json({ songs: [] });
   }
 });
