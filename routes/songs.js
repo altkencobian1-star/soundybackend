@@ -503,6 +503,59 @@ router.get('/spotify-search/:query', async (req, res) => {
   }
 });
 
+// Add YouTube song to personal library
+router.post('/add-youtube', authMiddleware, async (req, res) => {
+  const { youtube_url, video_id, title, artist, album } = req.body;
+  const userId = req.user.id;
+  
+  try {
+    console.log('Adding YouTube song:', { title, artist, video_id, userId });
+    
+    // Insert into database
+    const insertSql = `
+      INSERT INTO songs (title, artist, album, file_path, source, user_id, youtube_id)
+      VALUES (?, ?, ?, ?, 'youtube', ?, ?)
+    `;
+    
+    const result = runRun(insertSql, [
+      title,
+      artist,
+      album || 'YouTube',
+      youtube_url,
+      userId,
+      video_id
+    ]);
+    
+    if (result.changes > 0) {
+      const songId = getLastInsertId();
+      
+      // Get the inserted song
+      const song = runQuery('SELECT * FROM songs WHERE id = ?', [songId])[0];
+      
+      console.log('YouTube song added successfully:', song);
+      res.json({ 
+        success: true, 
+        song: {
+          id: song.id,
+          title: song.title,
+          artist: song.artist,
+          album: song.album,
+          file_path: song.file_path,
+          source: song.source,
+          youtube_id: song.youtube_id,
+          user_id: song.user_id
+        }
+      });
+    } else {
+      throw new Error('Failed to insert song');
+    }
+    
+  } catch (err) {
+    console.error('Add YouTube song error:', err);
+    res.status(500).json({ error: 'Failed to add YouTube song' });
+  }
+});
+
 // Simple YouTube search for full songs
 router.get('/youtube-search/:query', async (req, res) => {
   const { query } = req.params;
